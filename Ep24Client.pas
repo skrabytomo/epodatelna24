@@ -30,12 +30,20 @@ type
 
   TEp24InboxList = array of TEp24InboxItem;
 
+  { HTTP metoda pre interny request }
+  TEp24RequestMethod = (rmGET, rmPOST, rmPATCH);
+
   { Hlavna trieda klienta }
   TEp24Client = class
   private
     FBaseURL: string;
     FToken: string;
     FSimulation: string;
+
+    { Interny HTTP request - vsetky metody (GET/POST/PATCH) cez WinInet }
+    function DoRequest(const AMethod: TEp24RequestMethod; const APath: string;
+      const ABody: string; const AContentType: string;
+      const AIdempotencyKey: string): TEp24Result;
 
     function PostXML(const APath, AXML, AIdempotencyKey: string): TEp24Result;
     function GetRequest(const APath: string): TEp24Result;
@@ -156,11 +164,9 @@ end;
   HTTP - WinInet (spolocny kod pre vsetky metody)
   =========================================================================== }
 
-type
-  TRequestMethod = (rmGET, rmPOST, rmPATCH);
-
-function TEp24Client.DoRequest(const AMethod: TRequestMethod; const APath: string;
-  const ABody: string; const AContentType: string; const AIdempotencyKey: string): TEp24Result;
+function TEp24Client.DoRequest(const AMethod: TEp24RequestMethod;
+  const APath: string; const ABody: string; const AContentType: string;
+  const AIdempotencyKey: string): TEp24Result;
 var
   hSession, hConnect, hRequest: HINTERNET;
   Host: string;
@@ -203,8 +209,8 @@ begin
         Port := INTERNET_DEFAULT_HTTP_PORT;
 
       case AMethod of
-        rmGET:  MethodStr := 'GET';
-        rmPOST: MethodStr := 'POST';
+        rmGET:   MethodStr := 'GET';
+        rmPOST:  MethodStr := 'POST';
         rmPATCH: MethodStr := 'PATCH';
       end;
 
@@ -347,6 +353,7 @@ var
   ItemJSON: string;
   ArrayStart, ArrayEnd: Integer;
   ArrayContent: string;
+  BracketDepth: Integer;
 begin
   SetLength(Result, 0);
   Res := GetRequest('/api/v1/inbox/documents');
@@ -358,7 +365,16 @@ begin
 
   { Najdi zaciatok pola - ocakavame [{...}, {...}] }
   ArrayStart := Pos('[', JSON);
-  ArrayEnd := LastPos(']', JSON);
+
+  { Najdi koniec pola (posledna zatvorka) - LastPos neexistuje v Delphi 6 }
+  ArrayEnd := 0;
+  for P := Length(JSON) downto 1 do
+    if JSON[P] = ']' then
+    begin
+      ArrayEnd := P;
+      Break;
+    end;
+
   if (ArrayStart = 0) or (ArrayEnd = 0) or (ArrayEnd <= ArrayStart) then Exit;
 
   ArrayContent := Copy(JSON, ArrayStart + 1, ArrayEnd - ArrayStart - 1);
@@ -371,8 +387,14 @@ begin
     begin
       ItemStart := P;
       ItemEnd := P + 1;
-      while (ItemEnd <= Length(ArrayContent)) and (ArrayContent[ItemEnd] <> '}') do
+      BracketDepth := 1;
+      while (ItemEnd <= Length(ArrayContent)) and (BracketDepth > 0) do
+      begin
+        if ArrayContent[ItemEnd] = '{' then Inc(BracketDepth)
+        else if ArrayContent[ItemEnd] = '}' then Dec(BracketDepth);
         Inc(ItemEnd);
+      end;
+      Dec(ItemEnd);
 
       ItemJSON := Copy(ArrayContent, ItemStart, ItemEnd - ItemStart + 1);
 
