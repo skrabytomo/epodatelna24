@@ -1,9 +1,9 @@
 object FormMain: TFormMain
   Left = 192
   Top = 107
-  Width = 800
-  Height = 600
-  Caption = 'ePodatelna24 Sender (Delphi 6)'
+  Width = 900
+  Height = 700
+  Caption = 'ePodatelna24 Client (Delphi 6)'
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -12,12 +12,21 @@ object FormMain: TFormMain
   Font.Style = []
   OldCreateOrder = False
   OnCreate = FormCreate
+  OnDestroy = FormDestroy
   PixelsPerInch = 96
   TextHeight = 13
+  object Splitter1: TSplitter
+    Left = 0
+    Top = 425
+    Width = 884
+    Height = 3
+    Cursor = crVSplit
+    Align = alTop
+  end
   object PanelTop: TPanel
     Left = 0
     Top = 0
-    Width = 784
+    Width = 884
     Height = 105
     Align = alTop
     BevelOuter = bvNone
@@ -42,7 +51,7 @@ object FormMain: TFormMain
       Width = 600
       Height = 21
       TabOrder = 0
-      Text = 'https://sandbox.e-podatelna24.sk'
+      Text = 'https://epodatelna24-sandbox.vercel.app'
     end
     object edtToken: TEdit
       Left = 72
@@ -74,7 +83,7 @@ object FormMain: TFormMain
   object PanelMiddle: TPanel
     Left = 0
     Top = 105
-    Width = 784
+    Width = 884
     Height = 72
     Align = alTop
     BevelOuter = bvNone
@@ -115,7 +124,7 @@ object FormMain: TFormMain
   object PanelActions: TPanel
     Left = 0
     Top = 177
-    Width = 784
+    Width = 884
     Height = 80
     Align = alTop
     BevelOuter = bvNone
@@ -186,19 +195,99 @@ object FormMain: TFormMain
       TabOrder = 5
     end
   end
-  object PanelBottom: TPanel
+  object PanelInbox: TPanel
     Left = 0
     Top = 257
-    Width = 784
-    Height = 285
-    Align = alClient
+    Width = 884
+    Height = 168
+    Align = alTop
     BevelOuter = bvNone
     TabOrder = 3
+    object lblInboxCount: TLabel
+      Left = 8
+      Top = 4
+      Width = 38
+      Height = 13
+      Caption = 'Pocet: 0'
+    end
+    object lblSaveFolder: TLabel
+      Left = 8
+      Top = 144
+      Width = 55
+      Height = 13
+      Caption = 'Ulozit do:'
+    end
+    object lvInbox: TListView
+      Left = 8
+      Top = 20
+      Width = 768
+      Height = 116
+      Columns = <>
+      GridLines = True
+      ReadOnly = True
+      RowSelect = True
+      TabOrder = 0
+      ViewStyle = vsReport
+      OnDblClick = lvInboxDblClick
+    end
+    object edtSaveFolder: TEdit
+      Left = 72
+      Top = 140
+      Width = 600
+      Height = 21
+      TabOrder = 1
+      Text = 'inbox'
+    end
+    object btnBrowseFolder: TButton
+      Left = 680
+      Top = 140
+      Width = 100
+      Height = 21
+      Caption = 'Prehladavat...'
+      TabOrder = 2
+      OnClick = btnBrowseFolderClick
+    end
+    object btnCheckInbox: TButton
+      Left = 680
+      Top = 20
+      Width = 100
+      Height = 25
+      Caption = 'Kontrolovat'
+      TabOrder = 3
+      OnClick = btnCheckInboxClick
+    end
+    object btnDownloadSelected: TButton
+      Left = 680
+      Top = 50
+      Width = 100
+      Height = 25
+      Caption = 'Stiahnut'
+      TabOrder = 4
+      OnClick = btnDownloadSelectedClick
+    end
+    object btnMarkRead: TButton
+      Left = 680
+      Top = 80
+      Width = 100
+      Height = 25
+      Caption = 'Precitane'
+      TabOrder = 5
+      OnClick = btnMarkReadClick
+    end
+  end
+  object PanelBottom: TPanel
+    Left = 0
+    Top = 428
+    Width = 884
+    Height = 215
+    Align = alClient
+    BevelOuter = bvNone
+    TabOrder = 4
     object memLog: TMemo
       Left = 0
       Top = 0
-      Width = 784
-      Height = 285
+      Width = 884
+      Height = 215
       Align = alClient
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
@@ -213,15 +302,15 @@ object FormMain: TFormMain
   end
   object StatusBar: TStatusBar
     Left = 0
-    Top = 542
-    Width = 784
+    Top = 643
+    Width = 884
     Height = 19
     Panels = <>
     SimplePanel = True
   end
   object dlgOpenXML: TOpenDialog
     Filter = 'XML files (*.xml)|*.xml|All files (*.*)|*.*'
-    Left = 752
+    Left = 848
     Top = 144
   end
 end
