@@ -15,14 +15,6 @@ object FormMain: TFormMain
   OnDestroy = FormDestroy
   PixelsPerInch = 96
   TextHeight = 13
-  object Splitter1: TSplitter
-    Left = 0
-    Top = 425
-    Width = 884
-    Height = 3
-    Cursor = crVSplit
-    Align = alTop
-  end
   object PanelTop: TPanel
     Left = 0
     Top = 0
@@ -277,9 +269,9 @@ object FormMain: TFormMain
   end
   object PanelBottom: TPanel
     Left = 0
-    Top = 428
+    Top = 425
     Width = 884
-    Height = 215
+    Height = 218
     Align = alClient
     BevelOuter = bvNone
     TabOrder = 4
@@ -287,7 +279,7 @@ object FormMain: TFormMain
       Left = 0
       Top = 0
       Width = 884
-      Height = 215
+      Height = 218
       Align = alClient
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
