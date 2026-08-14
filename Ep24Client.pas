@@ -6,50 +6,64 @@ uses
   Classes, SysUtils, Windows, WinInet;
 
 type
-  { Vysledok volania API - obsahuje vsetky relevantne udaje z odpovede }
+  { Vysledok volania API }
   TEp24Result = record
-    HTTPStatus: Integer;      // HTTP stavovy kod (200, 202, 401, 403, ...)
-    ResponseBody: string;     // Telo odpovede (zvycajne JSON)
-    ContentType: string;      // Content-Type hlavicka odpovede
-    AcceptedAt: string;       // Cas prijatia dokumentu (z JSON odpovede)
-    SenderDic: string;        // DIC odosielatela (z JSON odpovede)
-    Code: string;             // Kod vysledku / chyby (z JSON odpovede)
-    IsSuccess: Boolean;      // True ak HTTPStatus je 200 alebo 202
+    HTTPStatus: Integer;
+    ResponseBody: string;
+    ContentType: string;
+    AcceptedAt: string;
+    SenderDic: string;
+    Code: string;
+    IsSuccess: Boolean;
   end;
 
-  { Hlavna trieda klienta pre komunikaciu s ePodatelna24 API }
+  { Polozka inboxu }
+  TEp24InboxItem = record
+    ID: string;
+    SenderDic: string;
+    SenderName: string;
+    ReceivedAt: string;
+    Subject: string;
+    Status: string;
+    IsRead: Boolean;
+  end;
+
+  TEp24InboxList = array of TEp24InboxItem;
+
+  { Hlavna trieda klienta }
   TEp24Client = class
   private
-    FBaseURL: string;         // Zakladna URL API (napr. https://...)
-    FToken: string;           // API token pre autentifikaciu
-    FSimulation: string;      // Rezim simulacie (prazdny = normalny rezim)
+    FBaseURL: string;
+    FToken: string;
+    FSimulation: string;
 
-    { Vykona HTTP POST poziadavku s XML obsahom }
     function PostXML(const APath, AXML, AIdempotencyKey: string): TEp24Result;
-    { Pomocna funkcia na extrahovanie hodnoty z jednoducheho JSON retazca }
+    function GetRequest(const APath: string): TEp24Result;
+    function PostEmpty(const APath: string): TEp24Result;
     function ExtractJSONString(const AJSON, AName: string): string;
+    function ExtractJSONBool(const AJSON, AName: string): Boolean;
   public
-    { Konstruktor - nastavi zakladnu URL a token }
     constructor Create(const ABaseURL, AToken: string);
-    { Nastavi rezim simulacie pre testovanie }
     procedure SetSimulation(const AValue: string);
-    { Vygeneruje nahodny UUID ako Idempotency-Key }
     function GenerateIdempotencyKey: string;
-    { Overi fakturu (validacia) - neuklada ju, len skontroluje }
+
+    { Outbox - odosielanie }
     function Validate(const AXML: string): TEp24Result;
-    { Odosle fakturu do ePodatelna24 - vyzaduje Idempotency-Key }
     function SendDocument(const AXML, AIdempotencyKey: string): TEp24Result;
+
+    { Inbox - prijimanie }
+    function GetInboxList: TEp24InboxList;
+    function GetInboxDocument(const ADocumentID: string): TEp24Result;
+    function GetInboxDocumentXML(const ADocumentID: string): string;
+    function AcknowledgeDocument(const ADocumentID: string): TEp24Result;
   end;
 
 implementation
 
 { ===========================================================================
-  POMOCNE FUNKCIE
+  POMOCNE FUNKCIE - JSON
   =========================================================================== }
 
-{ Extrahuje hodnotu retazca z JSON podla nazvu pola.
-  Napr. ExtractJSONString('"name":"John"', 'name') vrati 'John'.
-  Toto je velmi jednoduchy parser - predpoklada, ze hodnota je v uvodzovkach. }
 function TEp24Client.ExtractJSONString(const AJSON, AName: string): string;
 var
   P, StartPos, EndPos: Integer;
@@ -61,27 +75,19 @@ begin
   if P = 0 then Exit;
 
   P := P + Length(SearchText);
-
-  { Preskocime dvojbodku a medzery }
-  while (P <= Length(AJSON)) and (AJSON[P] <> ':') do
-    Inc(P);
+  while (P <= Length(AJSON)) and (AJSON[P] <> ':') do Inc(P);
   if P > Length(AJSON) then Exit;
   Inc(P);
+  while (P <= Length(AJSON)) and (AJSON[P] in [' ', #9, #10, #13]) do Inc(P);
 
-  while (P <= Length(AJSON)) and (AJSON[P] in [' ', #9, #10, #13]) do
-    Inc(P);
-
-  { Ocakavame uvodzovku na zaciatku hodnoty }
   if (P > Length(AJSON)) or (AJSON[P] <> '"') then Exit;
-
   StartPos := P + 1;
   EndPos := StartPos;
 
-  { Hladame koncovu uvodzovku, ignorujeme escapovane }
   while EndPos <= Length(AJSON) do
   begin
     if (AJSON[EndPos] = '"') and
-       ((EndPos = StartPos) or (AJSON[EndPos - 1] <> '\\')) then
+       ((EndPos = StartPos) or (AJSON[EndPos - 1] <> '\')) then
       Break;
     Inc(EndPos);
   end;
@@ -90,69 +96,77 @@ begin
     Result := Copy(AJSON, StartPos, EndPos - StartPos);
 end;
 
-{ Vygeneruje UUID GUID) a vrati ho bez zatvoriek
-  Pouziva sa ako Idempotency-Key - zabezpeci, ze rovnaka poziadavka
-  nebude spracovana dvakrat. }
+function TEp24Client.ExtractJSONBool(const AJSON, AName: string): Boolean;
+var
+  P: Integer;
+  SearchText: string;
+  Val: string;
+begin
+  Result := False;
+  SearchText := '"' + AName + '"';
+  P := Pos(SearchText, AJSON);
+  if P = 0 then Exit;
+
+  P := P + Length(SearchText);
+  while (P <= Length(AJSON)) and (AJSON[P] <> ':') do Inc(P);
+  if P > Length(AJSON) then Exit;
+  Inc(P);
+  while (P <= Length(AJSON)) and (AJSON[P] in [' ', #9, #10, #13]) do Inc(P);
+
+  if P > Length(AJSON) then Exit;
+  Val := LowerCase(Copy(AJSON, P, 5));
+  Result := Pos('true', Val) = 1;
+end;
+
+{ ===========================================================================
+  POMOCNE FUNKCIE - UUID
+  =========================================================================== }
+
 function TEp24Client.GenerateIdempotencyKey: string;
 var
   GUID: TGUID;
 begin
   if CreateGUID(GUID) <> S_OK then
     raise Exception.Create('Nepodarilo sa vygenerovat UUID');
-
   Result := GUIDToString(GUID);
-
-  { Odstranime zatvorky  ak su pritomne }
-  if (Length(Result) >= 2) and
-     (Result[1] = '{') and
-     (Result[Length(Result)] = '}') then
-  begin
+  if (Length(Result) >= 2) and (Result[1] = '{') and (Result[Length(Result)] = '}') then
     Result := Copy(Result, 2, Length(Result) - 2);
-  end;
 end;
 
 { ===========================================================================
-  HLAVNA TRIEDA - TEp24Client
+  KONSTRUKTOR
   =========================================================================== }
 
-{ Konstruktor: ulozi zakladnu URL a token, odstrani koncove lomky z URL }
 constructor TEp24Client.Create(const ABaseURL, AToken: string);
 begin
   inherited Create;
   FBaseURL := ABaseURL;
   FToken := AToken;
   FSimulation := '';
-
-  { Odstranime pripadne koncove lomky, aby sme predisli duplicitam }
-  while (Length(FBaseURL) > 0) and
-        (FBaseURL[Length(FBaseURL)] = '/') do
+  while (Length(FBaseURL) > 0) and (FBaseURL[Length(FBaseURL)] = '/') do
     Delete(FBaseURL, Length(FBaseURL), 1);
 end;
 
-{ Nastavenie rezimu simulacie - API vrati simulovanu odpoved
-  namiesto skutocneho spracovania. Hodnoty: 'success', 'validation_error',
-  'server_error', alebo prazdny retazec pre normalny rezim. }
 procedure TEp24Client.SetSimulation(const AValue: string);
 begin
   FSimulation := AValue;
 end;
 
 { ===========================================================================
-  HTTP KOMUNIKACIA - WinInet (bez externych SSL kniznic)
-  ===========================================================================
-  Pouzivame WinInet namiesto Indy, pretoze:
-  1. Nepotrebujeme ziadne externe DLL (libeay32.dll, ssleay32.dll)
-  2. Windows ma vstavanu podporu TLS 1.2/1.3 cez Schannel
-  3. Funguje na Windows XP a novsich bez dodatocnej instalacie
+  HTTP - WinInet (spolocny kod pre vsetky metody)
   =========================================================================== }
 
-function TEp24Client.PostXML(const APath, AXML, AIdempotencyKey: string): TEp24Result;
+type
+  TRequestMethod = (rmGET, rmPOST, rmPATCH);
+
+function TEp24Client.DoRequest(const AMethod: TRequestMethod; const APath: string;
+  const ABody: string; const AContentType: string; const AIdempotencyKey: string): TEp24Result;
 var
   hSession, hConnect, hRequest: HINTERNET;
   Host: string;
   Port: Word;
   Flags: DWORD;
-  Headers, PostData: string;
+  Headers: string;
   ResponseStream: TMemoryStream;
   Buffer: array[0..4095] of Byte;
   BytesRead: DWORD;
@@ -162,10 +176,11 @@ var
   ContentTypeBuf: array[0..255] of Char;
   ContentTypeLen: DWORD;
   ResponseText: string;
+  MethodStr: string;
+  BodyPtr: PChar;
+  BodyLen: DWORD;
 begin
-  { Vynulujeme vysledok }
   FillChar(Result, SizeOf(Result), 0);
-
   hSession := nil;
   hConnect := nil;
   hRequest := nil;
@@ -173,7 +188,6 @@ begin
 
   try
     try
-      { ---- Rozparsovanie zakladnej URL ------------------------------- }
       Host := FBaseURL;
       if Pos('https://', Host) = 1 then
       begin
@@ -188,45 +202,55 @@ begin
       else
         Port := INTERNET_DEFAULT_HTTP_PORT;
 
-      { ---- Vytvorenie HTTP session ----------------------------------- }
-      hSession := InternetOpen('Ep24Sender/1.0', INTERNET_OPEN_TYPE_PRECONFIG,
+      case AMethod of
+        rmGET:  MethodStr := 'GET';
+        rmPOST: MethodStr := 'POST';
+        rmPATCH: MethodStr := 'PATCH';
+      end;
+
+      hSession := InternetOpen('Ep24Client/1.0', INTERNET_OPEN_TYPE_PRECONFIG,
                                  nil, nil, 0);
       if hSession = nil then
         raise Exception.Create('InternetOpen zlyhal: ' + IntToStr(GetLastError));
 
-      { ---- Pripojenie k serveru -------------------------------------- }
       hConnect := InternetConnect(hSession, PChar(Host), Port,
                                     nil, nil, INTERNET_SERVICE_HTTP, 0, 0);
       if hConnect = nil then
         raise Exception.Create('InternetConnect zlyhal: ' + IntToStr(GetLastError));
 
-      { ---- Priprava poziadavky --------------------------------------- }
       Flags := INTERNET_FLAG_RELOAD;
       if Port = INTERNET_DEFAULT_HTTPS_PORT then
         Flags := Flags or INTERNET_FLAG_SECURE;
 
-      hRequest := HttpOpenRequest(hConnect, 'POST', PChar(APath),
+      hRequest := HttpOpenRequest(hConnect, PChar(MethodStr), PChar(APath),
                                     'HTTP/1.1', nil, nil, Flags, 0);
       if hRequest = nil then
         raise Exception.Create('HttpOpenRequest zlyhal: ' + IntToStr(GetLastError));
 
-      { ---- Zostavenie HTTP hlaviciek -------------------------------- }
-      Headers := 'Content-Type: application/xml; charset=utf-8'#13#10 +
-                 'Authorization: Token ' + FToken + #13#10;
+      Headers := 'Authorization: Token ' + FToken + #13#10;
+      if AContentType <> '' then
+        Headers := Headers + 'Content-Type: ' + AContentType + #13#10;
+      Headers := Headers + 'Accept: application/json'#13#10;
       if AIdempotencyKey <> '' then
         Headers := Headers + 'Idempotency-Key: ' + AIdempotencyKey + #13#10;
       if FSimulation <> '' then
         Headers := Headers + 'X-Ep24-Simulate: ' + FSimulation + #13#10;
 
-      { ---- Odoslanie poziadavky -------------------------------------- }
-      { AXML uz obsahuje surove UTF-8 bajty - neprevadzame ich cez UTF8Encode! }
-      PostData := AXML;
+      if ABody <> '' then
+      begin
+        BodyPtr := PChar(ABody);
+        BodyLen := Length(ABody);
+      end
+      else
+      begin
+        BodyPtr := nil;
+        BodyLen := 0;
+      end;
 
       if not HttpSendRequest(hRequest, PChar(Headers), Length(Headers),
-                             PChar(PostData), Length(PostData)) then
+                             BodyPtr, BodyLen) then
         raise Exception.Create('HttpSendRequest zlyhal: ' + IntToStr(GetLastError));
 
-      { ---- Citanie HTTP stavoveho kodu ------------------------------- }
       StatusCode := 0;
       StatusCodeLen := SizeOf(StatusCode);
       Index := 0;
@@ -234,7 +258,6 @@ begin
                        @StatusCode, StatusCodeLen, Index) then
         Result.HTTPStatus := StatusCode;
 
-      { ---- Citanie Content-Type -------------------------------------- }
       FillChar(ContentTypeBuf, SizeOf(ContentTypeBuf), 0);
       ContentTypeLen := SizeOf(ContentTypeBuf);
       Index := 0;
@@ -242,7 +265,6 @@ begin
                        @ContentTypeBuf, ContentTypeLen, Index) then
         Result.ContentType := string(ContentTypeBuf);
 
-      { ---- Citanie tela odpovede ------------------------------------- }
       repeat
         if not InternetReadFile(hRequest, @Buffer, SizeOf(Buffer), BytesRead) then
           raise Exception.Create('InternetReadFile zlyhal: ' + IntToStr(GetLastError));
@@ -250,7 +272,6 @@ begin
           ResponseStream.Write(Buffer, BytesRead);
       until BytesRead = 0;
 
-      { ---- Konverzia odpovede na retazec ---------------------------- }
       ResponseStream.Position := 0;
       if ResponseStream.Size > 0 then
       begin
@@ -261,12 +282,7 @@ begin
         ResponseText := '';
 
       Result.ResponseBody := ResponseText;
-
-      { ---- Urcenie uspesnosti ---------------------------------------- }
-      Result.IsSuccess :=
-        (Result.HTTPStatus >= 200) and (Result.HTTPStatus < 300);
-
-      { ---- Extrakcia poli z JSON odpovede ---------------------------- }
+      Result.IsSuccess := (Result.HTTPStatus >= 200) and (Result.HTTPStatus < 300);
       Result.Code := ExtractJSONString(ResponseText, 'code');
       Result.AcceptedAt := ExtractJSONString(ResponseText, 'acceptedAt');
       Result.SenderDic := ExtractJSONString(ResponseText, 'senderDic');
@@ -280,7 +296,6 @@ begin
       end;
     end;
   finally
-    { Uvolnenie vsetkych WinInet handle-ov }
     if hRequest <> nil then InternetCloseHandle(hRequest);
     if hConnect <> nil then InternetCloseHandle(hConnect);
     if hSession <> nil then InternetCloseHandle(hSession);
@@ -288,24 +303,143 @@ begin
   end;
 end;
 
+function TEp24Client.PostXML(const APath, AXML, AIdempotencyKey: string): TEp24Result;
+begin
+  Result := DoRequest(rmPOST, APath, AXML, 'application/xml; charset=utf-8', AIdempotencyKey);
+end;
+
+function TEp24Client.GetRequest(const APath: string): TEp24Result;
+begin
+  Result := DoRequest(rmGET, APath, '', '', '');
+end;
+
+function TEp24Client.PostEmpty(const APath: string): TEp24Result;
+begin
+  Result := DoRequest(rmPOST, APath, '', '', '');
+end;
+
 { ===========================================================================
-  VEREJNE METODY - VALIDACIA A ODESLANIE
+  OUTBOX - odosielanie (povodne metody)
   =========================================================================== }
 
-{ Overenie faktury: API skontroluje XML, ale neulozi ho do systemu }
 function TEp24Client.Validate(const AXML: string): TEp24Result;
 begin
   Result := PostXML('/api/v1/outbox/documents/validate', AXML, '');
 end;
 
-{ Odoslanie faktury: API prijme a spracuje fakturu.
-  Idempotency-Key je povinny - zabranuje duplicitnemu odoslaniu. }
 function TEp24Client.SendDocument(const AXML, AIdempotencyKey: string): TEp24Result;
 begin
   if AIdempotencyKey = '' then
     raise Exception.Create('Idempotency-Key je povinny');
-
   Result := PostXML('/api/v1/outbox/documents', AXML, AIdempotencyKey);
+end;
+
+{ ===========================================================================
+  INBOX - prijimanie (nove metody)
+  =========================================================================== }
+
+function TEp24Client.GetInboxList: TEp24InboxList;
+var
+  Res: TEp24Result;
+  JSON: string;
+  P, ItemStart, ItemEnd: Integer;
+  Count: Integer;
+  ItemJSON: string;
+  ArrayStart, ArrayEnd: Integer;
+  ArrayContent: string;
+begin
+  SetLength(Result, 0);
+  Res := GetRequest('/api/v1/inbox/documents');
+
+  if not Res.IsSuccess then
+    raise Exception.Create('Inbox query failed: ' + Res.ResponseBody);
+
+  JSON := Res.ResponseBody;
+
+  { Najdi zaciatok pola - ocakavame [{...}, {...}] }
+  ArrayStart := Pos('[', JSON);
+  ArrayEnd := LastPos(']', JSON);
+  if (ArrayStart = 0) or (ArrayEnd = 0) or (ArrayEnd <= ArrayStart) then Exit;
+
+  ArrayContent := Copy(JSON, ArrayStart + 1, ArrayEnd - ArrayStart - 1);
+
+  Count := 0;
+  P := 1;
+  while P <= Length(ArrayContent) do
+  begin
+    if ArrayContent[P] = '{' then
+    begin
+      ItemStart := P;
+      ItemEnd := P + 1;
+      while (ItemEnd <= Length(ArrayContent)) and (ArrayContent[ItemEnd] <> '}') do
+        Inc(ItemEnd);
+
+      ItemJSON := Copy(ArrayContent, ItemStart, ItemEnd - ItemStart + 1);
+
+      SetLength(Result, Count + 1);
+      Result[Count].ID := ExtractJSONString(ItemJSON, 'id');
+      Result[Count].SenderDic := ExtractJSONString(ItemJSON, 'senderDic');
+      Result[Count].SenderName := ExtractJSONString(ItemJSON, 'senderName');
+      Result[Count].ReceivedAt := ExtractJSONString(ItemJSON, 'receivedAt');
+      Result[Count].Subject := ExtractJSONString(ItemJSON, 'subject');
+      Result[Count].Status := ExtractJSONString(ItemJSON, 'status');
+      Result[Count].IsRead := ExtractJSONBool(ItemJSON, 'isRead');
+      Inc(Count);
+
+      P := ItemEnd + 1;
+    end
+    else
+      Inc(P);
+  end;
+end;
+
+function TEp24Client.GetInboxDocument(const ADocumentID: string): TEp24Result;
+begin
+  Result := GetRequest('/api/v1/inbox/documents/' + ADocumentID);
+end;
+
+function TEp24Client.GetInboxDocumentXML(const ADocumentID: string): string;
+var
+  Res: TEp24Result;
+begin
+  Result := '';
+
+  { Skusime najprv /xml }
+  Res := GetRequest('/api/v1/inbox/documents/' + ADocumentID + '/xml');
+  if Res.IsSuccess then
+  begin
+    if Pos('application/xml', Res.ContentType) > 0 then
+      Result := Res.ResponseBody
+    else
+      Result := ExtractJSONString(Res.ResponseBody, 'xml');
+    Exit;
+  end;
+
+  { Ak /xml nefunguje, skusime priamo dokument }
+  Res := GetRequest('/api/v1/inbox/documents/' + ADocumentID);
+  if Res.IsSuccess then
+  begin
+    if Pos('application/xml', Res.ContentType) > 0 then
+      Result := Res.ResponseBody
+    else
+    begin
+      Result := ExtractJSONString(Res.ResponseBody, 'xml');
+      if Result = '' then
+        Result := ExtractJSONString(Res.ResponseBody, 'content');
+      if Result = '' then
+        Result := Res.ResponseBody;
+    end;
+  end
+  else
+    raise Exception.Create('Download failed: ' + Res.ResponseBody);
+end;
+
+function TEp24Client.AcknowledgeDocument(const ADocumentID: string): TEp24Result;
+begin
+  { Skusime POST /acknowledge, ak nefunguje, skusime PATCH }
+  Result := PostEmpty('/api/v1/inbox/documents/' + ADocumentID + '/acknowledge');
+  if not Result.IsSuccess then
+    Result := DoRequest(rmPATCH, '/api/v1/inbox/documents/' + ADocumentID, '', '', '');
 end;
 
 end.
