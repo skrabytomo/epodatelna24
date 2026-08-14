@@ -516,7 +516,10 @@ begin
 
   ForceDirectories(edtSaveFolder.Text);
   FileName := DocID + '.xml';
-  SavePath := IncludeTrailingBackslash(edtSaveFolder.Text) + FileName;
+      SavePath := edtSaveFolder.Text;
+    if (SavePath <> '') and (SavePath[Length(SavePath)] <> '\') then
+      SavePath := SavePath + '\';
+    SavePath := SavePath + FileName;
 
   DownloadDocument(DocID, SavePath);
 end;
