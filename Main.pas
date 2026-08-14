@@ -4,47 +4,59 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, StdCtrls, ComCtrls, ExtCtrls, IniFiles, Ep24Client;
+  Dialogs, StdCtrls, ComCtrls, ExtCtrls, IniFiles, FileCtrl, Ep24Client;
 
 type
   TFormMain = class(TForm)
     { --- Horny panel - nastavenia API ---------------------------------- }
     PanelTop: TPanel;
-    lblBaseURL: TLabel;           // Popisok pre URL
-    lblToken: TLabel;             // Popisok pre token
-    edtBaseURL: TEdit;            // Zakladna URL API
-    edtToken: TEdit;              // API token (heslo)
-    btnLoadConfig: TButton;       // Tlacidlo: Nacitat konfiguraciu
-    btnSaveConfig: TButton;       // Tlacidlo: Ulozit konfiguraciu
+    lblBaseURL: TLabel;
+    lblToken: TLabel;
+    edtBaseURL: TEdit;
+    edtToken: TEdit;
+    btnLoadConfig: TButton;
+    btnSaveConfig: TButton;
 
     { --- Stredny panel - vyber XML suboru ------------------------------ }
     PanelMiddle: TPanel;
-    lblXMLFile: TLabel;           // Popisok pre cestu k XML
-    edtXMLFile: TEdit;            // Cesta k XML suboru
-    btnBrowseXML: TButton;        // Tlacidlo: Prehladavat...
-    btnLoadXML: TButton;          // Tlacidlo: Nacitat XML
+    lblXMLFile: TLabel;
+    edtXMLFile: TEdit;
+    btnBrowseXML: TButton;
+    btnLoadXML: TButton;
 
     { --- Panel akcii - odoslanie --------------------------------------- }
     PanelActions: TPanel;
-    lblIdempotencyKey: TLabel;    // Popisok pre kluc
-    lblSimulation: TLabel;        // Popisok pre simulaciu
-    edtIdempotencyKey: TEdit;     // Idempotency-Key (UUID)
-    btnGenerateKey: TButton;      // Tlacidlo: Vygenerovat kluc
-    cmbSimulation: TComboBox;     // Vyber rezimu simulacie
-    btnValidate: TButton;         // Tlacidlo: Overit fakturu
-    btnSend: TButton;             // Tlacidlo: Odoslat fakturu
-    chkAutoProcess: TCheckBox;    // Zaskrtavacie policko: Automaticke odoslanie
+    lblIdempotencyKey: TLabel;
+    lblSimulation: TLabel;
+    edtIdempotencyKey: TEdit;
+    btnGenerateKey: TButton;
+    cmbSimulation: TComboBox;
+    btnValidate: TButton;
+    btnSend: TButton;
+    chkAutoProcess: TCheckBox;
+
+    { --- Panel inbox - prijimanie -------------------------------------- }
+    PanelInbox: TPanel;
+    lvInbox: TListView;
+    lblSaveFolder: TLabel;
+    edtSaveFolder: TEdit;
+    btnBrowseFolder: TButton;
+    btnCheckInbox: TButton;
+    btnDownloadSelected: TButton;
+    btnMarkRead: TButton;
+    lblInboxCount: TLabel;
 
     { --- Spodny panel - log -------------------------------------------- }
     PanelBottom: TPanel;
-    memLog: TMemo;                // Vypis logov a odpovedi
-    StatusBar: TStatusBar;          // Stavovy riadok
+    memLog: TMemo;
+    StatusBar: TStatusBar;
 
-    { --- Dialog pre vyber suboru --------------------------------------- }
+    { --- Dialogy ------------------------------------------------------- }
     dlgOpenXML: TOpenDialog;
 
     { --- Event handlery ------------------------------------------------ }
     procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
     procedure btnLoadConfigClick(Sender: TObject);
     procedure btnSaveConfigClick(Sender: TObject);
     procedure btnBrowseXMLClick(Sender: TObject);
@@ -52,18 +64,26 @@ type
     procedure btnGenerateKeyClick(Sender: TObject);
     procedure btnValidateClick(Sender: TObject);
     procedure btnSendClick(Sender: TObject);
+    procedure btnBrowseFolderClick(Sender: TObject);
+    procedure btnCheckInboxClick(Sender: TObject);
+    procedure btnDownloadSelectedClick(Sender: TObject);
+    procedure btnMarkReadClick(Sender: TObject);
+    procedure lvInboxDblClick(Sender: TObject);
   private
-    FClient: TEp24Client;         // Instancia klienta pre API
+    FClient: TEp24Client;
+    FInboxItems: TEp24InboxList;
 
     function ConfigFileName: string;
-    { Nacita XML subor ako surove bajty (zachova UTF-8 kodovanie) }
     function LoadXMLFromFile(const AFileName: string): string;
-    { Zapise vysledok volania do logu }
     procedure LogResult(const AResult: TEp24Result);
-    { Jednoduchy zapis do logu }
     procedure Log(const AMsg: string);
-    { Automaticky proces: nacitat -> vygenerovat kluc -> overit -> odoslat }
     procedure ProcessXMLAuto(const AFileName: string);
+
+    { Inbox pomocne metody }
+    procedure SetupInboxColumns;
+    procedure RefreshInboxList;
+    procedure DownloadDocument(const ADocID, ASavePath: string);
+    function GetSelectedDocID: string;
   public
   end;
 
@@ -74,27 +94,26 @@ implementation
 
 {$R *.dfm}
 
+uses
+  XmlLoader;
+
 const
-  { Predvolena URL sandbox prostredia ePodatelna24 }
   DEFAULT_URL = 'https://epodatelna24-sandbox.vercel.app';
 
 { ===========================================================================
   POMOCNE METODY
   =========================================================================== }
 
-{ Vrati cestu k INI suboru - ulozeny v rovnakom priecinku ako .exe }
 function TFormMain.ConfigFileName: string;
 begin
   Result := ChangeFileExt(Application.ExeName, '.ini');
 end;
 
-{ Zapise spravu do logovacieho pola }
 procedure TFormMain.Log(const AMsg: string);
 begin
   memLog.Lines.Add(AMsg);
 end;
 
-{ Zformatuje a zapise vysledok API volania }
 procedure TFormMain.LogResult(const AResult: TEp24Result);
 begin
   Log('---');
@@ -108,52 +127,131 @@ begin
   Log('---');
 end;
 
-{ ===========================================================================
-  NACITANIE XML - SUROVE BAJTY (DOLEZITE!)
-  ===========================================================================
-  TStringList.LoadFromFile v Delphi 6 pouziva systemovu znakovu sadu
-  (Windows-1250), nie UTF-8. To by poskodilo slovenske znaky (n, z, s, c).
-  Preto pouzivame TFileStream, ktory precita subor ako surove bajty
-  bez akejkolvek konverzie.
-  =========================================================================== }
 function TFormMain.LoadXMLFromFile(const AFileName: string): string;
-var
-  Stream: TFileStream;
-  Size: Integer;
 begin
   Result := '';
   if not FileExists(AFileName) then Exit;
+  Result := XmlLoader.LoadXMLFromFile(AFileName);
+end;
 
-  Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
+{ ===========================================================================
+  INBOX - POMOCNE METODY
+  =========================================================================== }
+
+procedure TFormMain.SetupInboxColumns;
+begin
+  lvInbox.ViewStyle := vsReport;
+  lvInbox.Columns.Clear;
+  with lvInbox.Columns.Add do
+  begin
+    Caption := 'ID';
+    Width := 120;
+  end;
+  with lvInbox.Columns.Add do
+  begin
+    Caption := 'Odosielatel';
+    Width := 150;
+  end;
+  with lvInbox.Columns.Add do
+  begin
+    Caption := 'DIC';
+    Width := 100;
+  end;
+  with lvInbox.Columns.Add do
+  begin
+    Caption := 'Prijate';
+    Width := 120;
+  end;
+  with lvInbox.Columns.Add do
+  begin
+    Caption := 'Predmet';
+    Width := 200;
+  end;
+  with lvInbox.Columns.Add do
+  begin
+    Caption := 'Stav';
+    Width := 80;
+  end;
+end;
+
+procedure TFormMain.RefreshInboxList;
+var
+  i: Integer;
+  Item: TListItem;
+begin
+  lvInbox.Items.Clear;
+  lblInboxCount.Caption := 'Pocet: 0';
+
+  if Length(FInboxItems) = 0 then Exit;
+
+  for i := 0 to High(FInboxItems) do
+  begin
+    Item := lvInbox.Items.Add;
+    Item.Caption := FInboxItems[i].ID;
+    Item.SubItems.Add(FInboxItems[i].SenderName);
+    Item.SubItems.Add(FInboxItems[i].SenderDic);
+    Item.SubItems.Add(FInboxItems[i].ReceivedAt);
+    Item.SubItems.Add(FInboxItems[i].Subject);
+    Item.SubItems.Add(FInboxItems[i].Status);
+    if not FInboxItems[i].IsRead then
+      Item.ImageIndex := -1; { Mozno pridat ikonu neprecitanej }
+  end;
+
+  lblInboxCount.Caption := 'Pocet: ' + IntToStr(Length(FInboxItems));
+end;
+
+function TFormMain.GetSelectedDocID: string;
+begin
+  Result := '';
+  if (lvInbox.Selected <> nil) and (lvInbox.Selected.Caption <> '') then
+    Result := lvInbox.Selected.Caption;
+end;
+
+procedure TFormMain.DownloadDocument(const ADocID, ASavePath: string);
+var
+  XML: string;
+begin
+  if ADocID = '' then
+  begin
+    Log('CHYBA: Najprv vyberte dokument z inboxu.');
+    Exit;
+  end;
+
+  if FClient = nil then
+    FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
+
+  if cmbSimulation.Text <> '' then
+    FClient.SetSimulation(cmbSimulation.Text);
+
+  Log('Stahujem XML pre dokument ' + ADocID + '...');
   try
-    Size := Stream.Size;
-    if Size > 0 then
+    XML := FClient.GetInboxDocumentXML(ADocID);
+    if XML = '' then
     begin
-      SetLength(Result, Size);
-      Stream.ReadBuffer(Result[1], Size);
+      Log('CHYBA: Prazdna odpoved - dokument nema XML.');
+      Exit;
     end;
-  finally
-    Stream.Free;
+
+    if XmlLoader.SaveXMLToFile(ASavePath, XML) then
+      Log('ULOZENE: ' + ASavePath + ' (' + IntToStr(Length(XML)) + ' bajtov)')
+    else
+      Log('CHYBA: Nepodarilo sa ulozit subor.');
+  except
+    on E: Exception do
+      Log('CHYBA: ' + E.Message);
   end;
 end;
 
 { ===========================================================================
-  AUTOMATICKA SPRACOVANIE
-  ===========================================================================
-  Tato procedura vykona cely proces v jednom kroku:
-  1. Nacita XML subor
-  2. Vytvori noveho klienta s aktualnym nastavenim
-  3. Vygeneruje Idempotency-Key
-  4. Overi fakturu (validacia)
-  5. Ak validacia presla, odosle fakturu
+  AUTOMATICKA SPRACOVANIE (odosielanie)
   =========================================================================== }
+
 procedure TFormMain.ProcessXMLAuto(const AFileName: string);
 var
   XML: string;
   Res: TEp24Result;
   Key: string;
 begin
-  { 1. Nacitanie XML }
   XML := LoadXMLFromFile(AFileName);
   if XML = '' then
   begin
@@ -162,20 +260,16 @@ begin
   end;
   Log('Nacitanych ' + IntToStr(Length(XML)) + ' bajtov z ' + AFileName);
 
-  { 2. Vytvorenie klienta }
   if FClient <> nil then FClient.Free;
   FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
 
-  { 3. Nastavenie simulacie ak je vybrata }
   if cmbSimulation.Text <> '' then
     FClient.SetSimulation(cmbSimulation.Text);
 
-  { 4. Vygenerovanie Idempotency-Key }
   Key := FClient.GenerateIdempotencyKey;
   edtIdempotencyKey.Text := Key;
   Log('Vygenerovany Idempotency-Key: ' + Key);
 
-  { 5. Validacia }
   Log('Overujem fakturu...');
   Res := FClient.Validate(XML);
   LogResult(Res);
@@ -186,14 +280,12 @@ begin
     Exit;
   end;
 
-  { Kontrola ci je faktura platna podla API }
   if Pos('"valid":false', Res.ResponseBody) > 0 then
   begin
     Log('Faktura obsahuje chyby - odoslanie bolo zrusene.');
     Exit;
   end;
 
-  { 6. Odoslanie }
   Log('Odosielam fakturu...');
   Res := FClient.SendDocument(XML, Key);
   LogResult(Res);
@@ -205,37 +297,39 @@ begin
 end;
 
 { ===========================================================================
-  INICIALIZACIA FORMULARA
+  INICIALIZACIA A DESTRUKTOR
   =========================================================================== }
 
 procedure TFormMain.FormCreate(Sender: TObject);
 begin
-  { Nastavenie predvolenej URL }
   edtBaseURL.Text := DEFAULT_URL;
 
-  { Naplnenie comboboxu pre simulaciu }
-  cmbSimulation.Items.Add('');                    // Normalny rezim
-  cmbSimulation.Items.Add('success');               // Simulacia uspechu
-  cmbSimulation.Items.Add('validation_error');      // Simulacia chyby validacie
-  cmbSimulation.Items.Add('server_error');          // Simulacia chyby servera
+  cmbSimulation.Items.Add('');
+  cmbSimulation.Items.Add('success');
+  cmbSimulation.Items.Add('validation_error');
+  cmbSimulation.Items.Add('server_error');
+  cmbSimulation.Items.Add('inbox_new');      { Simulacia novej polozky v inboxe }
+  cmbSimulation.Items.Add('inbox_empty');    { Simulacia prazdneho inboxu }
   cmbSimulation.ItemIndex := 0;
 
-  { Automaticke nacitanie konfiguracie pri starte }
+  SetupInboxColumns;
+
+  edtSaveFolder.Text := ExtractFilePath(Application.ExeName) + 'inbox';
+
   if FileExists(ConfigFileName) then
     btnLoadConfigClick(nil);
 end;
 
+procedure TFormMain.FormDestroy(Sender: TObject);
+begin
+  if FClient <> nil then
+    FClient.Free;
+end;
+
 { ===========================================================================
-  KONFIGURACIA - NACITANIE A ULOZENIE
-  ===========================================================================
-  Konfiguracia sa uklada do INI suboru v rovnakom priecinku ako aplikacia.
-  Format INI:
-    [EP24]
-    BaseURL=https://epodatelna24-sandbox.vercel.app
-    Token=ep24api_test_...
+  KONFIGURACIA
   =========================================================================== }
 
-{ Nacita konfiguraciu z INI suboru }
 procedure TFormMain.btnLoadConfigClick(Sender: TObject);
 var
   Ini: TIniFile;
@@ -250,13 +344,14 @@ begin
   try
     edtBaseURL.Text := Ini.ReadString('EP24', 'BaseURL', DEFAULT_URL);
     edtToken.Text   := Ini.ReadString('EP24', 'Token', '');
+    edtSaveFolder.Text := Ini.ReadString('EP24', 'SaveFolder',
+      ExtractFilePath(Application.ExeName) + 'inbox');
     Log('Konfiguracia nacitana z ' + ConfigFileName);
   finally
     Ini.Free;
   end;
 end;
 
-{ Ulozi konfiguraciu do INI suboru }
 procedure TFormMain.btnSaveConfigClick(Sender: TObject);
 var
   Ini: TIniFile;
@@ -265,6 +360,7 @@ begin
   try
     Ini.WriteString('EP24', 'BaseURL', edtBaseURL.Text);
     Ini.WriteString('EP24', 'Token', edtToken.Text);
+    Ini.WriteString('EP24', 'SaveFolder', edtSaveFolder.Text);
     Log('Konfiguracia ulozena do ' + ConfigFileName);
   finally
     Ini.Free;
@@ -272,20 +368,15 @@ begin
 end;
 
 { ===========================================================================
-  VYBER A NACITANIE XML SUBORU
+  VYBER A NACITANIE XML (odosielanie)
   =========================================================================== }
 
-{ Otvori dialog pre vyber XML suboru }
 procedure TFormMain.btnBrowseXMLClick(Sender: TObject);
 begin
   if dlgOpenXML.Execute then
     edtXMLFile.Text := dlgOpenXML.FileName;
 end;
 
-{ Nacita XML subor.
-  AK je zaskrtnute "Automaticky odoslat po nacitani",
-  automaticky vykona cely proces validacie a odoslania
-  bez dalsieho klikania. }
 procedure TFormMain.btnLoadXMLClick(Sender: TObject);
 begin
   if edtXMLFile.Text = '' then
@@ -294,12 +385,10 @@ begin
     Exit;
   end;
 
-  { Ak je zaskrtnuty automaticky rezim, spracujeme vsetko naraz }
   if chkAutoProcess.Checked then
     ProcessXMLAuto(edtXMLFile.Text)
   else
   begin
-    { Len nacitame a vypiseme info - manualny rezim }
     if not FileExists(edtXMLFile.Text) then
     begin
       Log('Subor neexistuje: ' + edtXMLFile.Text);
@@ -311,13 +400,9 @@ begin
 end;
 
 { ===========================================================================
-  MANUALNE KROKY (povodne tlacidla)
-  ===========================================================================
-  Tieto tlacidla umoznuju krokovat proces manualne - uzitocne pri
-  ladenie alebo ked chcete vidiet medzivysledky validacie pred odoslanim.
+  MANUALNE KROKY - ODOSIELANIE
   =========================================================================== }
 
-{ Vygeneruje novy Idempotency-Key }
 procedure TFormMain.btnGenerateKeyClick(Sender: TObject);
 begin
   if FClient <> nil then FClient.Free;
@@ -326,7 +411,6 @@ begin
   Log('Vygenerovany novy Idempotency-Key');
 end;
 
-{ Manualna validacia faktury }
 procedure TFormMain.btnValidateClick(Sender: TObject);
 var
   Res: TEp24Result;
@@ -350,7 +434,6 @@ begin
   LogResult(Res);
 end;
 
-{ Manualne odoslanie faktury }
 procedure TFormMain.btnSendClick(Sender: TObject);
 var
   Res: TEp24Result;
@@ -381,6 +464,102 @@ begin
   Log('Odosielam fakturu (manualne)...');
   Res := FClient.SendDocument(XML, Key);
   LogResult(Res);
+end;
+
+{ ===========================================================================
+  INBOX - PRIJIMANIE
+  =========================================================================== }
+
+procedure TFormMain.btnBrowseFolderClick(Sender: TObject);
+var
+  Dir: string;
+begin
+  Dir := edtSaveFolder.Text;
+  if SelectDirectory('Vyberte priecinok pre stahovanie', '', Dir) then
+    edtSaveFolder.Text := Dir;
+end;
+
+procedure TFormMain.btnCheckInboxClick(Sender: TObject);
+begin
+  if FClient <> nil then FClient.Free;
+  FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
+
+  if cmbSimulation.Text <> '' then
+    FClient.SetSimulation(cmbSimulation.Text);
+
+  Log('Kontrolujem inbox...');
+  try
+    FInboxItems := FClient.GetInboxList;
+    RefreshInboxList;
+    Log('Najdenych ' + IntToStr(Length(FInboxItems)) + ' dokumentov v inboxe.');
+  except
+    on E: Exception do
+    begin
+      Log('CHYBA pri nacitani inboxu: ' + E.Message);
+      Log('Tip: Skontrolujte ci endpoint /api/v1/inbox/documents existuje.');
+    end;
+  end;
+end;
+
+procedure TFormMain.btnDownloadSelectedClick(Sender: TObject);
+var
+  DocID: string;
+  SavePath: string;
+  FileName: string;
+begin
+  DocID := GetSelectedDocID;
+  if DocID = '' then
+  begin
+    Log('CHYBA: Najprv vyberte dokument z zoznamu.');
+    Exit;
+  end;
+
+  ForceDirectories(edtSaveFolder.Text);
+  FileName := DocID + '.xml';
+  SavePath := IncludeTrailingBackslash(edtSaveFolder.Text) + FileName;
+
+  DownloadDocument(DocID, SavePath);
+end;
+
+procedure TFormMain.btnMarkReadClick(Sender: TObject);
+var
+  DocID: string;
+  Res: TEp24Result;
+begin
+  DocID := GetSelectedDocID;
+  if DocID = '' then
+  begin
+    Log('CHYBA: Najprv vyberte dokument z zoznamu.');
+    Exit;
+  end;
+
+  if FClient = nil then
+    FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
+
+  if cmbSimulation.Text <> '' then
+    FClient.SetSimulation(cmbSimulation.Text);
+
+  Log('Označujem dokument ' + DocID + ' ako precitany...');
+  try
+    Res := FClient.AcknowledgeDocument(DocID);
+    LogResult(Res);
+    if Res.IsSuccess then
+    begin
+      Log('Dokument oznaceny ako precitany.');
+      { Aktualizujeme zoznam }
+      btnCheckInboxClick(nil);
+    end
+    else
+      Log('Nepodarilo sa oznacit dokument.');
+  except
+    on E: Exception do
+      Log('CHYBA: ' + E.Message);
+  end;
+end;
+
+procedure TFormMain.lvInboxDblClick(Sender: TObject);
+begin
+  btnDownloadSelectedClick(nil);
 end;
 
 end.
