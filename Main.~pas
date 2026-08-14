@@ -1,0 +1,241 @@
+unit Main;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls, ComCtrls, ExtCtrls, IniFiles, Ep24Client;
+
+type
+  TFormMain = class(TForm)
+    PanelTop: TPanel;
+    lblBaseURL: TLabel;
+    lblToken: TLabel;
+    edtBaseURL: TEdit;
+    edtToken: TEdit;
+    btnLoadConfig: TButton;
+    btnSaveConfig: TButton;
+    PanelMiddle: TPanel;
+    lblXMLFile: TLabel;
+    edtXMLFile: TEdit;
+    btnBrowseXML: TButton;
+    btnLoadXML: TButton;
+    PanelActions: TPanel;
+    lblIdempotencyKey: TLabel;
+    lblSimulation: TLabel;
+    edtIdempotencyKey: TEdit;
+    btnGenerateKey: TButton;
+    cmbSimulation: TComboBox;
+    btnValidate: TButton;
+    btnSend: TButton;
+    PanelBottom: TPanel;
+    memLog: TMemo;
+    StatusBar: TStatusBar;
+    dlgOpenXML: TOpenDialog;
+    procedure FormCreate(Sender: TObject);
+    procedure btnLoadConfigClick(Sender: TObject);
+    procedure btnSaveConfigClick(Sender: TObject);
+    procedure btnBrowseXMLClick(Sender: TObject);
+    procedure btnLoadXMLClick(Sender: TObject);
+    procedure btnGenerateKeyClick(Sender: TObject);
+    procedure btnValidateClick(Sender: TObject);
+    procedure btnSendClick(Sender: TObject);
+  private
+    FClient: TEp24Client;
+    function ConfigFileName: string;
+    function LoadXMLFromFile(const AFileName: string): string;
+    procedure LogResult(const AResult: TEp24Result);
+    procedure Log(const AMsg: string);
+  public
+  end;
+
+var
+  FormMain: TFormMain;
+
+implementation
+
+{$R *.dfm}
+
+const
+  DEFAULT_URL = 'https://epodatelna24-sandbox.vercel.app';
+
+{ --------------------------------------------------------------------------- }
+function TFormMain.ConfigFileName: string;
+begin
+  Result := ChangeFileExt(Application.ExeName, '.ini');
+end;
+
+procedure TFormMain.FormCreate(Sender: TObject);
+begin
+  edtBaseURL.Text := DEFAULT_URL;
+
+  cmbSimulation.Items.Add('');
+  cmbSimulation.Items.Add('success');
+  cmbSimulation.Items.Add('validation_error');
+  cmbSimulation.Items.Add('server_error');
+  cmbSimulation.ItemIndex := 0;
+
+  { Auto-load config if it exists }
+  if FileExists(ConfigFileName) then
+    btnLoadConfigClick(nil);
+end;
+
+procedure TFormMain.Log(const AMsg: string);
+begin
+  memLog.Lines.Add(AMsg);
+end;
+
+procedure TFormMain.LogResult(const AResult: TEp24Result);
+begin
+  Log('---');
+  Log('HTTP Status: ' + IntToStr(AResult.HTTPStatus));
+  Log('Success: ' + BoolToStr(AResult.IsSuccess, True));
+  Log('Code: ' + AResult.Code);
+  Log('AcceptedAt: ' + AResult.AcceptedAt);
+  Log('SenderDic: ' + AResult.SenderDic);
+  Log('Response:');
+  Log(AResult.ResponseBody);
+  Log('---');
+end;
+
+{ --------------------------------------------------------------------------- }
+{ Read XML file as RAW BYTES (preserves UTF-8 encoding) }
+function TFormMain.LoadXMLFromFile(const AFileName: string): string;
+var
+  Stream: TFileStream;
+  Size: Integer;
+begin
+  Result := '';
+  if not FileExists(AFileName) then Exit;
+
+  Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
+  try
+    Size := Stream.Size;
+    if Size > 0 then
+    begin
+      SetLength(Result, Size);
+      Stream.ReadBuffer(Result[1], Size);
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TFormMain.btnLoadConfigClick(Sender: TObject);
+var
+  Ini: TIniFile;
+begin
+  if not FileExists(ConfigFileName) then
+  begin
+    Log('Config file not found: ' + ConfigFileName);
+    Exit;
+  end;
+
+  Ini := TIniFile.Create(ConfigFileName);
+  try
+    edtBaseURL.Text := Ini.ReadString('EP24', 'BaseURL', DEFAULT_URL);
+    edtToken.Text   := Ini.ReadString('EP24', 'Token', '');
+    Log('Config loaded from ' + ConfigFileName);
+  finally
+    Ini.Free;
+  end;
+end;
+
+procedure TFormMain.btnSaveConfigClick(Sender: TObject);
+var
+  Ini: TIniFile;
+begin
+  Ini := TIniFile.Create(ConfigFileName);
+  try
+    Ini.WriteString('EP24', 'BaseURL', edtBaseURL.Text);
+    Ini.WriteString('EP24', 'Token', edtToken.Text);
+    Log('Config saved to ' + ConfigFileName);
+  finally
+    Ini.Free;
+  end;
+end;
+
+procedure TFormMain.btnBrowseXMLClick(Sender: TObject);
+begin
+  if dlgOpenXML.Execute then
+    edtXMLFile.Text := dlgOpenXML.FileName;
+end;
+
+procedure TFormMain.btnLoadXMLClick(Sender: TObject);
+var
+  XML: string;
+begin
+  XML := LoadXMLFromFile(edtXMLFile.Text);
+  if XML = '' then
+  begin
+    Log('File not found or empty: ' + edtXMLFile.Text);
+    Exit;
+  end;
+
+  Log('Loaded ' + IntToStr(Length(XML)) + ' bytes from ' + edtXMLFile.Text);
+end;
+
+procedure TFormMain.btnGenerateKeyClick(Sender: TObject);
+begin
+  if FClient <> nil then FClient.Free;
+  FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
+  edtIdempotencyKey.Text := FClient.GenerateIdempotencyKey;
+end;
+
+{ --------------------------------------------------------------------------- }
+procedure TFormMain.btnValidateClick(Sender: TObject);
+var
+  Res: TEp24Result;
+  XML: string;
+begin
+  if FClient <> nil then FClient.Free;
+  FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
+
+  if cmbSimulation.Text <> '' then
+    FClient.SetSimulation(cmbSimulation.Text);
+
+  XML := LoadXMLFromFile(edtXMLFile.Text);
+  if XML = '' then
+  begin
+    Log('No XML file loaded. Please browse and load an XML file first.');
+    Exit;
+  end;
+
+  Log('Validating...');
+  Res := FClient.Validate(XML);
+  LogResult(Res);
+end;
+
+procedure TFormMain.btnSendClick(Sender: TObject);
+var
+  Res: TEp24Result;
+  XML: string;
+  Key: string;
+begin
+  if FClient <> nil then FClient.Free;
+  FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
+
+  if cmbSimulation.Text <> '' then
+    FClient.SetSimulation(cmbSimulation.Text);
+
+  XML := LoadXMLFromFile(edtXMLFile.Text);
+  if XML = '' then
+  begin
+    Log('No XML file loaded. Please browse and load an XML file first.');
+    Exit;
+  end;
+
+  Key := edtIdempotencyKey.Text;
+  if Key = '' then
+  begin
+    Key := FClient.GenerateIdempotencyKey;
+    edtIdempotencyKey.Text := Key;
+    Log('Auto-generated Idempotency-Key: ' + Key);
+  end;
+
+  Log('Sending...');
+  Res := FClient.SendDocument(XML, Key);
+  LogResult(Res);
+end;
+
+end.

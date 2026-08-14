@@ -1,0 +1,219 @@
+object FormMain: TFormMain
+  Left = 192
+  Top = 107
+  Width = 800
+  Height = 600
+  Caption = 'ePodatelna24 Sender (Delphi 6)'
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -11
+  Font.Name = 'MS Sans Serif'
+  Font.Style = []
+  OldCreateOrder = False
+  OnCreate = FormCreate
+  PixelsPerInch = 96
+  TextHeight = 13
+  object PanelTop: TPanel
+    Left = 0
+    Top = 0
+    Width = 784
+    Height = 105
+    Align = alTop
+    BevelOuter = bvNone
+    TabOrder = 0
+    object lblBaseURL: TLabel
+      Left = 8
+      Top = 12
+      Width = 52
+      Height = 13
+      Caption = 'Base URL:'
+    end
+    object lblToken: TLabel
+      Left = 8
+      Top = 60
+      Width = 54
+      Height = 13
+      Caption = 'API Token:'
+    end
+    object edtBaseURL: TEdit
+      Left = 72
+      Top = 8
+      Width = 600
+      Height = 21
+      TabOrder = 0
+      Text = 'https://sandbox.e-podatelna24.sk'
+    end
+    object edtToken: TEdit
+      Left = 72
+      Top = 56
+      Width = 600
+      Height = 21
+      PasswordChar = '*'
+      TabOrder = 1
+    end
+    object btnLoadConfig: TButton
+      Left = 680
+      Top = 8
+      Width = 100
+      Height = 25
+      Caption = 'Load Config'
+      TabOrder = 2
+      OnClick = btnLoadConfigClick
+    end
+    object btnSaveConfig: TButton
+      Left = 680
+      Top = 40
+      Width = 100
+      Height = 25
+      Caption = 'Save Config'
+      TabOrder = 3
+      OnClick = btnSaveConfigClick
+    end
+  end
+  object PanelMiddle: TPanel
+    Left = 0
+    Top = 105
+    Width = 784
+    Height = 72
+    Align = alTop
+    BevelOuter = bvNone
+    TabOrder = 1
+    object lblXMLFile: TLabel
+      Left = 8
+      Top = 12
+      Width = 44
+      Height = 13
+      Caption = 'XML File:'
+    end
+    object edtXMLFile: TEdit
+      Left = 72
+      Top = 8
+      Width = 600
+      Height = 21
+      TabOrder = 0
+    end
+    object btnBrowseXML: TButton
+      Left = 680
+      Top = 8
+      Width = 100
+      Height = 25
+      Caption = 'Browse...'
+      TabOrder = 1
+      OnClick = btnBrowseXMLClick
+    end
+    object btnLoadXML: TButton
+      Left = 72
+      Top = 36
+      Width = 100
+      Height = 25
+      Caption = 'Load XML'
+      TabOrder = 2
+      OnClick = btnLoadXMLClick
+    end
+  end
+  object PanelActions: TPanel
+    Left = 0
+    Top = 177
+    Width = 784
+    Height = 80
+    Align = alTop
+    BevelOuter = bvNone
+    TabOrder = 2
+    object lblIdempotencyKey: TLabel
+      Left = 8
+      Top = 12
+      Width = 85
+      Height = 13
+      Caption = 'Idempotency Key:'
+    end
+    object lblSimulation: TLabel
+      Left = 8
+      Top = 44
+      Width = 51
+      Height = 13
+      Caption = 'Simulation:'
+    end
+    object edtIdempotencyKey: TEdit
+      Left = 96
+      Top = 8
+      Width = 400
+      Height = 21
+      TabOrder = 0
+    end
+    object btnGenerateKey: TButton
+      Left = 504
+      Top = 8
+      Width = 120
+      Height = 25
+      Caption = 'Generate Key'
+      TabOrder = 1
+      OnClick = btnGenerateKeyClick
+    end
+    object cmbSimulation: TComboBox
+      Left = 96
+      Top = 40
+      Width = 200
+      Height = 21
+      Style = csDropDownList
+      ItemHeight = 13
+      TabOrder = 2
+    end
+    object btnValidate: TButton
+      Left = 320
+      Top = 40
+      Width = 120
+      Height = 25
+      Caption = 'Validate'
+      TabOrder = 3
+      OnClick = btnValidateClick
+    end
+    object btnSend: TButton
+      Left = 456
+      Top = 40
+      Width = 120
+      Height = 25
+      Caption = 'Send'
+      TabOrder = 4
+      OnClick = btnSendClick
+    end
+  end
+  object PanelBottom: TPanel
+    Left = 0
+    Top = 257
+    Width = 784
+    Height = 285
+    Align = alClient
+    BevelOuter = bvNone
+    TabOrder = 3
+    object memLog: TMemo
+      Left = 0
+      Top = 0
+      Width = 784
+      Height = 285
+      Align = alClient
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -11
+      Font.Name = 'Courier New'
+      Font.Style = []
+      ParentFont = False
+      ReadOnly = True
+      ScrollBars = ssBoth
+      TabOrder = 0
+    end
+  end
+  object StatusBar: TStatusBar
+    Left = 0
+    Top = 542
+    Width = 784
+    Height = 19
+    Panels = <>
+    SimplePanel = True
+  end
+  object dlgOpenXML: TOpenDialog
+    Filter = 'XML files (*.xml)|*.xml|All files (*.*)|*.*'
+    Left = 752
+    Top = 144
+  end
+end
