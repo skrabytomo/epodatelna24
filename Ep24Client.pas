@@ -356,23 +356,34 @@ var
   ArrayStart, ArrayEnd: Integer;
   ArrayContent: string;
   BracketDepth: Integer;
+  CandidatePaths: array[0..3] of string;
+  i: Integer;
 begin
   SetLength(Result, 0);
-  Res := GetRequest('/api/v1/inbox/documents');
+
+  CandidatePaths[0] := '/api/v1/inbox/documents';
+  CandidatePaths[1] := '/api/v1/inbox';
+  CandidatePaths[2] := '/api/inbox/documents';
+  CandidatePaths[3] := '/api/inbox';
+
+  Res.HTTPStatus := 404;
+  for i := 0 to High(CandidatePaths) do
+  begin
+    Res := GetRequest(CandidatePaths[i]);
+    if Res.HTTPStatus <> 404 then
+      Break;
+  end;
 
   if not Res.IsSuccess then
   begin
-    { Endpoint neexistuje alebo zlyhal - nehadzeme exception,
-      volajuci si pozrie Res.HTTPStatus a Res.ResponseBody }
+    { Endpoint neexistuje alebo zlyhal - nehadzeme exception }
     Exit;
   end;
 
   JSON := Res.ResponseBody;
 
-  { Najdi zaciatok pola - ocakavame [{...}, {...}] }
   ArrayStart := Pos('[', JSON);
 
-  { Najdi koniec pola (posledna zatvorka) - LastPos neexistuje v Delphi 6 }
   ArrayEnd := 0;
   for P := Length(JSON) downto 1 do
     if JSON[P] = ']' then
