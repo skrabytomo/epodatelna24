@@ -482,7 +482,7 @@ end;
 procedure TFormMain.btnCheckInboxClick(Sender: TObject);
 var
   Res: TEp24Result;
-  CandidatePaths: array[0..3] of string;
+  CandidatePaths: array[0..13] of string;
   FoundPath: string;
   i: Integer;
 begin
