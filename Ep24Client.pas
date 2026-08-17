@@ -46,7 +46,6 @@ type
       const AIdempotencyKey: string): TEp24Result;
 
     function PostXML(const APath, AXML, AIdempotencyKey: string): TEp24Result;
-    function GetRequest(const APath: string): TEp24Result;
     function PostEmpty(const APath: string): TEp24Result;
     function ExtractJSONString(const AJSON, AName: string): string;
     function ExtractJSONBool(const AJSON, AName: string): Boolean;
@@ -64,6 +63,9 @@ type
     function GetInboxDocument(const ADocumentID: string): TEp24Result;
     function GetInboxDocumentXML(const ADocumentID: string): string;
     function AcknowledgeDocument(const ADocumentID: string): TEp24Result;
+
+    { Debug / raw request }
+    function GetRequest(const APath: string): TEp24Result;
   end;
 
 implementation
