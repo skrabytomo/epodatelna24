@@ -482,6 +482,9 @@ end;
 procedure TFormMain.btnCheckInboxClick(Sender: TObject);
 var
   Res: TEp24Result;
+  CandidatePaths: array[0..3] of string;
+  FoundPath: string;
+  i: Integer;
 begin
   if FClient <> nil then FClient.Free;
   FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
@@ -491,17 +494,33 @@ begin
 
   Log('Kontrolujem inbox...');
 
-  { Najprv urobime raw GET aby sme videli co server vrati }
-  Res := FClient.GetRequest('/api/v1/inbox/documents');
-  Log('GET /api/v1/inbox/documents -> HTTP ' + IntToStr(Res.HTTPStatus));
+  { Najprv urobime raw GET na viacero kandidatov }
+  CandidatePaths[0] := '/api/v1/inbox/documents';
+  CandidatePaths[1] := '/api/v1/inbox';
+  CandidatePaths[2] := '/api/inbox/documents';
+  CandidatePaths[3] := '/api/inbox';
+
+  for i := 0 to High(CandidatePaths) do
+  begin
+    Res := FClient.GetRequest(CandidatePaths[i]);
+    Log('GET ' + CandidatePaths[i] + ' -> HTTP ' + IntToStr(Res.HTTPStatus));
+    if Res.HTTPStatus <> 404 then
+    begin
+      FoundPath := CandidatePaths[i];
+      Break;
+    end;
+  end;
+
   if not Res.IsSuccess then
   begin
-    Log('ODPOVED (prvych 500 znakov):');
-    Log(Copy(Res.ResponseBody, 1, 500));
+    Log('ODPOVED (prvych 300 znakov):');
+    Log(Copy(Res.ResponseBody, 1, 300));
     Log('---');
-    Log('Endpoint /api/v1/inbox/documents nefunguje. Skuste iny.');
+    Log('Ziadny inbox endpoint nefunguje.');
     Exit;
   end;
+
+  Log('Pouzivam endpoint: ' + FoundPath);
 
   try
     FInboxItems := FClient.GetInboxList;
