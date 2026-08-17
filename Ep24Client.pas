@@ -356,15 +356,25 @@ var
   ArrayStart, ArrayEnd: Integer;
   ArrayContent: string;
   BracketDepth: Integer;
-  CandidatePaths: array[0..3] of string;
+  CandidatePaths: array[0..13] of string;
   i: Integer;
 begin
   SetLength(Result, 0);
 
-  CandidatePaths[0] := '/api/v1/inbox/documents';
-  CandidatePaths[1] := '/api/v1/inbox';
-  CandidatePaths[2] := '/api/inbox/documents';
-  CandidatePaths[3] := '/api/inbox';
+  CandidatePaths[0]  := '/api/v1/inbox/documents';
+  CandidatePaths[1]  := '/api/v1/inbox';
+  CandidatePaths[2]  := '/api/inbox/documents';
+  CandidatePaths[3]  := '/api/inbox';
+  CandidatePaths[4]  := '/api/v1/documents';
+  CandidatePaths[5]  := '/api/documents';
+  CandidatePaths[6]  := '/api/v1/received';
+  CandidatePaths[7]  := '/api/received';
+  CandidatePaths[8]  := '/api/v1/documents/inbox';
+  CandidatePaths[9]  := '/api/v1/messages';
+  CandidatePaths[10] := '/api/v1/messages/inbox';
+  CandidatePaths[11] := '/api/v2/inbox/documents';
+  CandidatePaths[12] := '/api/v1/invoice/received';
+  CandidatePaths[13] := '/api/v1/dashboard/inbox';
 
   Res.HTTPStatus := 404;
   for i := 0 to High(CandidatePaths) do
