@@ -480,6 +480,8 @@ begin
 end;
 
 procedure TFormMain.btnCheckInboxClick(Sender: TObject);
+var
+  Res: TEp24Result;
 begin
   if FClient <> nil then FClient.Free;
   FClient := TEp24Client.Create(edtBaseURL.Text, edtToken.Text);
@@ -488,6 +490,19 @@ begin
     FClient.SetSimulation(cmbSimulation.Text);
 
   Log('Kontrolujem inbox...');
+
+  { Najprv urobime raw GET aby sme videli co server vrati }
+  Res := FClient.GetRequest('/api/v1/inbox/documents');
+  Log('GET /api/v1/inbox/documents -> HTTP ' + IntToStr(Res.HTTPStatus));
+  if not Res.IsSuccess then
+  begin
+    Log('ODPOVED (prvych 500 znakov):');
+    Log(Copy(Res.ResponseBody, 1, 500));
+    Log('---');
+    Log('Endpoint /api/v1/inbox/documents nefunguje. Skuste iny.');
+    Exit;
+  end;
+
   try
     FInboxItems := FClient.GetInboxList;
     RefreshInboxList;
@@ -495,8 +510,7 @@ begin
   except
     on E: Exception do
     begin
-      Log('CHYBA pri nacitani inboxu: ' + E.Message);
-      Log('Tip: Skontrolujte ci endpoint /api/v1/inbox/documents existuje.');
+      Log('CHYBA pri parsovani inboxu: ' + E.Message);
     end;
   end;
 end;
