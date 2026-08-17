@@ -359,7 +359,11 @@ begin
   Res := GetRequest('/api/v1/inbox/documents');
 
   if not Res.IsSuccess then
-    raise Exception.Create('Inbox query failed: ' + Res.ResponseBody);
+  begin
+    { Endpoint neexistuje alebo zlyhal - nehadzeme exception,
+      volajuci si pozrie Res.HTTPStatus a Res.ResponseBody }
+    Exit;
+  end;
 
   JSON := Res.ResponseBody;
 
